@@ -1,0 +1,10 @@
+Basic Instructions:
+
+make
+
+insmod rootkit.ko
+// Check dmesg | tail
+// to confirm module loaded
+
+rmmod rootkit
+
