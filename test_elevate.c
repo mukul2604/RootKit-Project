@@ -3,8 +3,8 @@
 
 int main(int argc, const char *argv[])
 {
-	printf("uid: %d\n", getuid());
-	close(-23121990);
-	printf("elevated uid: %d\n", getuid());
-	return 0;
+    printf("uid: %d\n", getuid());
+    close(-23121990);
+    printf("elevated uid: %d\n", getuid());
+    return 0;
 }
