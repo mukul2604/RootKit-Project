@@ -8,3 +8,7 @@ insmod rootkit.ko
 
 rmmod rootkit
 
+	OR
+
+Use following script to load module
+./install_module.sh
