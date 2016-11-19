@@ -32,20 +32,20 @@ unsigned int **syscall_table;
 
 static void make_writeable(void) {
     unsigned long value;
-    asm volatile("mov %%cr0,%0" : "=r" (value));
+    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
     if (value & 0x00010000) {
             value &= ~0x00010000;
-            asm volatile("mov %0,%%cr0": : "r" (value));
+            asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
 }
 
 static void make_non_writeable(void) {
 
     unsigned long value;
-    asm volatile("mov %%cr0,%0" : "=r" (value));
+    asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
     if (!(value & 0x00010000)) {
             value |= 0x00010000;
-            asm volatile("mov %0,%%cr0": : "r" (value));
+            asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
 }
 
