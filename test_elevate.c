@@ -25,8 +25,6 @@ int main(int argc, const char *argv[])
 void try_something_rooty()
 {
     int fd;
-    char *buf;
-    int i, num_read;
 
     const char *path = "/testing";
     
