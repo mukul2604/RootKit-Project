@@ -15,7 +15,7 @@ int main (int argc, const char *argv[])
     printf("You should NOT be able to see this process right now\n");
     printf("Sleeping for %d seconds\n", DELAY);
     sleep(DELAY);
-    
+
     close(SHOW_PROC);
     printf("\nYou SHOULD be able to see this process right now\n");
     printf("Sleeping for %d seconds\n", DELAY);

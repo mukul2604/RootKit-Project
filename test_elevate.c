@@ -11,7 +11,7 @@ int main(int argc, const char *argv[])
 {
 
     printf("Normal program; uid: %d\n", getuid());
-    try_something_rooty(); 
+    try_something_rooty();
 
     printf("\nElevate privileges\n");
     close(ELEVATE_UID);
@@ -27,7 +27,7 @@ void try_something_rooty()
     int fd;
 
     const char *path = "/testing";
-    
+
     printf("Trying to create %s\n", path);
     fd = open(path, O_RDONLY | O_CREAT, 0755);
     if (fd < 0) {
@@ -37,4 +37,3 @@ void try_something_rooty()
         printf("%s created\n", path);
     }
 }
-

