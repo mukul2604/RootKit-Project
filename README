@@ -1,14 +1,28 @@
-Basic Instructions:
+HOW TO INSTALL
+==============
+Issue the following commands:
+1. make
 
-make
+2. insmod rootkit.ko
+	OR
+  Use following script to load module
+  ./install_module.sh
 
-insmod rootkit.ko
-// Check dmesg | tail
-// to confirm module loaded
-
+HOW TO REMOVE
+=============
 rmmod rootkit
 
-	OR
 
-Use following script to load module
-./install_module.sh
+TESTCASES
+=========
+1. Adding a backdoor
+    * Make the call to close() and check if a backdoor is added by trying to log in as muzer.
+    * Uninstall the module and check if the backdoor goes away. It should.
+    * Add/delete/modify a user and see if the update is visible in the /etc/passwd file. It should be. Only muzer should be invisible.
+
+2.
+
+
+TODO
+====
+1. Mention sources for all code fragments that we took from anywhere.
