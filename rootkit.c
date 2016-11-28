@@ -95,7 +95,7 @@ asmlinkage long (*original_open)(const char __user *pathname,
 int deletes_file(struct file*);
 int creates_backdoor_copies(void);
 
-/* Modify the CR0 register to block writes on syscall table */
+/* Modify the CR0 register to allow writes on syscall table */
 static void disable_write_protection(void)
 {
     unsigned long value;
@@ -106,7 +106,7 @@ static void disable_write_protection(void)
     }
 }
 
-/* Modify the CR0 register to allow writes on syscall table */
+/* Modify the CR0 register to block writes on syscall table */
 static void enable_write_protection(void)
 {
     unsigned long value;

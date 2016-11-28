@@ -12,6 +12,7 @@ Authors:
 
 HOW TO INSTALL
 ==============
+The module compiles and installs cleanly without *ANY warning*.
 Issue the following commands:
 1. make
 2. ./install_module.sh
@@ -28,6 +29,12 @@ DESIGN
     There is a lot of test code present in this directory, but the intent of that code
     is merely to communicate with the module. All the test code is UNNECESARY for the
     module.
+
+    Adding backdoor and hiding files and folders automatically starts with the loading of
+    the module and stops with the unloading.
+
+    Elevating privilages and hiding the processes from showing up in ps -ef happens when
+    a process requests the same to the module using our hijacked sys_close() call.
 
     Adding backdoor
     ---------------
@@ -46,10 +53,35 @@ DESIGN
     we automatically remove the malicious files. We can also remove them on user request via close()
     system call.
 
-    
+    Elevating user privilages
+    -------------------------
+    Calls hijacked: sys_close()
+
+    The process that calls close() with specific value of file descriptor gets its privilage in
+    task_struct structure modified. This structure is available to kernel in the form of the
+    label "current" and has details of the process calling the system call.
+
+    Hiding specific files and directories
+    -------------------------------------
+    Calls hijacked: sys_close() and sys_getdents()
+
+    When a process calls to hide files, a flag in the module is set. This flag is by default set
+    when the module is loaded too. With this flag set, our hijacked getdents() call will not
+    return any file starting with the prefix "cse509--".
+
+    Hiding processes
+    ----------------
+    Calls hijacked: sys_close(), sys_getdents() and sys_open()
+
+    When a process requests to be hidden, its pid is saved in a list in the module.
+    When someone calls open on /proc, we monitor if he is trying to getdent() the processes.
+    If he is, we don't return him any process already present in our list.
+
+
+
 TESTING
 =======
-We highly recomment that you run our automated test -> "run_testcases.sh"
+We highly recommend that you run our automated test -> "run_testcases.sh"
 This script will build the module, install the rootkit as well as run some testcases
 The script requires minimum manual intervention, eg. to type passwords
 We could have automated that with expect library but this is better for a demo
