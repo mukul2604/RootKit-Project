@@ -4,7 +4,7 @@
 #define HIDE_PROC -19091992
 #define SHOW_PROC -2051967
 
-#define DELAY 7
+#define DELAY 15
 
 int main (int argc, const char *argv[])
 {

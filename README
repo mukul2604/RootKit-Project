@@ -2,11 +2,7 @@ HOW TO INSTALL
 ==============
 Issue the following commands:
 1. make
-
-2. insmod rootkit.ko
-	OR
-  Use following script to load module
-  ./install_module.sh
+2. ./install_module.sh
 
 HOW TO REMOVE
 =============
@@ -23,6 +19,3 @@ TESTCASES
 2.
 
 
-TODO
-====
-1. Mention sources for all code fragments that we took from anywhere.
