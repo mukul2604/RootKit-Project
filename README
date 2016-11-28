@@ -1,12 +1,58 @@
+ROOTKIT PROJECT
+===============
+Linux 4.4 Kernel rootkit
+Done as a part of CSE 509 Computer System Security
+Runs on 64 bit as well as 32 bit systems
+Authors:
+    Shivanshu Goswami    110 898 793
+    Shikhar Sharma       110 739 968
+    Mukul Sharma         110 900 654
+    Pushkar Garg         110 763 734
+
+
 HOW TO INSTALL
 ==============
 Issue the following commands:
 1. make
 2. ./install_module.sh
 
+
 HOW TO REMOVE
 =============
 rmmod rootkit
+
+
+DESIGN
+======
+    All our magic happens in the kernel module implemented in rootkit.c.
+    There is a lot of test code present in this directory, but the intent of that code
+    is merely to communicate with the module. All the test code is UNNECESARY for the
+    module.
+
+    Adding backdoor
+    ---------------
+    Calls hijacked: sys_close() and sys_open()
+
+    We use sys_close() for communicating with the rootkit. We send the hijacked close()
+    system call, specific negative file descriptors as commands for our rootkit.
+
+    We made copies of existing /etc/passwd and /etc/shadow files with added backdoors
+    Whenever a set of processes, like login, accounts-daemon, sshd etc demand these files
+    to be opened, we return the file descriptor of the malicious files from the kernel.
+
+    To all normal processes, we return the uncompromised /etc/passwd and /etc/shadow. This
+    helps as our original files will never be corrupted. When the user adds or modifies a user
+    we trigger an update of our malicious files to accomodate this change. Upon module unload,
+    we automatically remove the malicious files. We can also remove them on user request via close()
+    system call.
+
+    
+TESTING
+=======
+We highly recomment that you run our automated test -> "run_testcases.sh"
+This script will build the module, install the rootkit as well as run some testcases
+The script requires minimum manual intervention, eg. to type passwords
+We could have automated that with expect library but this is better for a demo
 
 
 TESTCASES
@@ -16,6 +62,23 @@ TESTCASES
     * Uninstall the module and check if the backdoor goes away. It should.
     * Add/delete/modify a user and see if the update is visible in the /etc/passwd file. It should be. Only muzer should be invisible.
 
-2.
+2. Process hiding
+    * The process that calls close() with the proper negative value of file descriptor gets hidden from the output of ps -ef
 
+3. Process privilage elevation
+    * The process that calls close() with the proper negative value of file descriptor gets root privilages. It can drop these
+      privilages by making a similar call to close() later.
+
+4. Hiding files and folders
+    * By default when the rootkit is loaded, it is configured to hide folders starting with prefix "cse509--"
+    * Files within such folders, even without the prefix are also hidden
+    * Files starting with this prefix are also hidden
+    * By issuing a call to close() with appropriate negative value for file descriptor, we can make these files visible
+
+
+
+REFERENCES
+==========
+How to locate the system call table in linux kernel:
+https://memset.wordpress.com/2011/01/20/syscall-hijacking-dynamically-obtain-syscall-table-address-kernel-2-6-x/
 

